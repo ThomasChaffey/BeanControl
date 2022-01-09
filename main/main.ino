@@ -4,10 +4,7 @@
 
 #include <arduino-timer.h>
 #include <RotaryEncoder.h>
-#include <SPI.h>
-#include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SH110X.h>
+#include <ss_oled.h>
 
 
 // terminal definitions
@@ -17,11 +14,29 @@
 #define PWM 9
 
 // screen init
-#define i2c_Address 0x3c //initialize with the I2C addr 0x3C Typically eBay OLED's
-#define SCREEN_WIDTH 128 // OLED display width, in pixels
-#define SCREEN_HEIGHT 64 // OLED display height, in pixels
-#define OLED_RESET -1   //   QT-PY / XIAO
-Adafruit_SH1106G display = Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+static uint8_t ucBackBuffer[1024];
+#define SDA_PIN 2
+#define SCL_PIN 3
+// Set this to -1 to disable or the GPIO pin number connected to the reset
+// line of your display if it requires an external reset
+#define RESET_PIN -1
+// let ss_oled figure out the display address
+#define OLED_ADDR -1
+// don't rotate the display
+#define FLIP180 0
+// don't invert the display
+#define INVERT 0
+// Bit-Bang the I2C bus
+#define USE_HW_I2C 0
+
+#define MY_OLED OLED_128x64
+#define OLED_WIDTH 128
+#define OLED_HEIGHT 64
+
+unsigned long lastPrint = 0;
+#define PRINT_PERIOD 100
+
+SSOLED ssoled;
 
 // globals for setpoint
 #define REFERENCE 100
@@ -39,6 +54,9 @@ float t = 0.0; // stopwatch time
 // globals for PWM
 unsigned long lastPWMCycle = 0;
 
+// globals for temperature
+float temp = 21.0;
+
 // stopwatch function
 bool increment_time(void *) {
   t += 0.5;
@@ -54,8 +72,24 @@ bool turn_heat_off(void *) {
 
 // status printing function
 bool printStatus(void *) {
-  display.clearDisplay();
-  display.println(r);
+  char tempString[10];
+  dtostrf(temp, 4, 2, tempString);
+  char tempLine[12];
+  snprintf(tempLine, 12, "Temp: %5s", tempString);
+  oledWriteString(&ssoled, 0,16,0,tempLine, FONT_NORMAL, 0, 1);
+  
+  char rString[10];
+  dtostrf(r, 4, 2, rString);
+  char referenceLine[12];
+  snprintf(referenceLine, 12, "Ref:  %5s", rString);
+  oledWriteString(&ssoled, 0,16,2,referenceLine, FONT_NORMAL, 0, 1);
+
+    char tString[10];
+  dtostrf(t, 4, 2, tString);
+  char tLine[12];
+  snprintf(tLine, 12, "Time:  %5s", tString);
+  oledWriteString(&ssoled, 0,16,4, tLine, FONT_NORMAL, 0, 1);
+  
   return true;
 }
   
@@ -63,18 +97,16 @@ bool printStatus(void *) {
 void setup() {
   Serial.begin(9600);
   pinMode(SW, INPUT_PULLUP);
-  display.begin(i2c_Address, true); // Address 0x3C default
-  display.setTextSize(2);
-  display.setTextColor(SH110X_WHITE);
-  display.setCursor(0, 0);
-  display.println("Starting up");
+  int rc = oledInit(&ssoled, MY_OLED, OLED_ADDR, FLIP180, INVERT, USE_HW_I2C, SDA_PIN, SCL_PIN, RESET_PIN, 400000L); // use standard I2C bus at 400Khz
+  oledFill(&ssoled, 0, 1);
 }
 
 void loop() {
 
+  timer.tick(); // tick the timer
+  
   // setpoint section
-  encoder.tick();
-
+  encoder.tick();  
   static int pos = 0;
   int newPos = encoder.getPosition();
   if (pos != newPos) {
@@ -84,9 +116,6 @@ void loop() {
     Serial.println(r);
     pos = newPos;
   }
-
-  // stopwatch section
-  timer.tick(); // tick the timer
 
   // heat control
   unsigned long thisPWMCycle = millis();
@@ -98,24 +127,26 @@ void loop() {
     lastPWMCycle = thisPWMCycle;
   }
 
+  //stopwatch section
    // Read the button state
   int btnState = digitalRead(SW);
 
   //If we detect LOW signal, button is pressed
   if (btnState == LOW) {
-    //if 50ms have passed since last LOW pulse, it means that the
+    //if 100 ms have passed since last LOW pulse, it means that the
     //button has been pressed, released and pressed again
-    if (millis() - lastButtonPress > 50) {
+    if (millis() - lastButtonPress > 100) {
       if (stopwatchOn)
       {
-        timer.cancel(stopwatch);
         stopwatchOn = false;
+        timer.cancel(stopwatch);
       } else
       {
         // start the stopwatch, increment every half second
         t = 0.0;
-        stopwatch = timer.every(500, increment_time);
+        Serial.println("Button pressed");
         stopwatchOn = true;
+        stopwatch = timer.every(500, increment_time);
       }
     }
 
@@ -123,6 +154,10 @@ void loop() {
     lastButtonPress = millis();
   }
 
-  printStatus(NULL);
+  unsigned long thisPrint = millis();
+  if (thisPrint - lastPrint > PRINT_PERIOD){
+    printStatus(NULL);
+    lastPrint = thisPrint;
+  }
 
 }
