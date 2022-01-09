@@ -4,8 +4,11 @@
 
 #include <arduino-timer.h>
 #include <RotaryEncoder.h>
-#include <U8g2lib.h>
+#include <SPI.h>
 #include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SH110X.h>
+
 
 // terminal definitions
 #define SW 6
@@ -14,8 +17,11 @@
 #define PWM 9
 
 // screen init
-//U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
-U8GLIB_SH1106_128X64 u8g(U8G_I2C_OPT_NO_ACK);  // Display which does not send ACK
+#define i2c_Address 0x3c //initialize with the I2C addr 0x3C Typically eBay OLED's
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+#define OLED_RESET -1   //   QT-PY / XIAO
+Adafruit_SH1106G display = Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 // globals for setpoint
 #define REFERENCE 100
@@ -47,11 +53,9 @@ bool turn_heat_off(void *) {
 }
 
 // status printing function
-bool print_status(void *) {
-  u8g2.clearBuffer();
-  u8g2.setCursor(0, 16);
-  u8g2.print(r);
-  u8g2.sendBuffer();
+bool printStatus(void *) {
+  display.clearDisplay();
+  display.println(r);
   return true;
 }
   
@@ -59,9 +63,11 @@ bool print_status(void *) {
 void setup() {
   Serial.begin(9600);
   pinMode(SW, INPUT_PULLUP);
-  u8g2.begin();
-  u8g2.setFont(u8g2_font_logisoso16_tf);
-  Wire.setClock(400000); 
+  display.begin(i2c_Address, true); // Address 0x3C default
+  display.setTextSize(2);
+  display.setTextColor(SH110X_WHITE);
+  display.setCursor(0, 0);
+  display.println("Starting up");
 }
 
 void loop() {
@@ -117,7 +123,6 @@ void loop() {
     lastButtonPress = millis();
   }
 
-    // update screen every 0.2s
-    timer.every(1000, print_status);
+  printStatus(NULL);
 
 }
