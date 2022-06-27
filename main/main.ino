@@ -51,7 +51,7 @@ int steamAddress = sizeof(float);
 SSOLED ssoled;
 
 // control gains
-float ki = 0.00003;
+float ki = 0.00004;
 float kpBrew = 0.035;
 float kpSteam = 0.05; // aggressive control for steaming
 float kd = 0.00015;
@@ -60,6 +60,7 @@ float* kp = &kpBrew;
 // global integrator states
 float brewInt = 0.0;
 float steamInt = 0.0;
+int errorSign = 1;
 // for derivative calculation
 float previousTemp = 20.0;
 
@@ -92,6 +93,17 @@ Adafruit_MAX31865 thermo = Adafruit_MAX31865(10, 11, 12, 13);
 // 100.0 for PT100, 1000.0 for PT1000
 #define RNOMINAL  99.87579345
 
+// sign function
+int sign(float e) {
+  if (e == 0) {
+    return 0;
+  } else if (e > 0) {
+    return 1;
+  } else {
+    return -1;
+  }
+}
+
 // controller
 // output is saturated at 0 and 1 - multiply by PWMPERIOD to give ms of HIGH output
 float control(float ref, float temp, float* integrator) {
@@ -109,10 +121,17 @@ float control(float ref, float temp, float* integrator) {
     output = 0.0;
   } else if (output > 1.0) {
     output = 1.0;
-    *integrator -= e;
+    *integrator -= e; // don't integrate when saturated
   }
+
+  // Clegg integrator - reset at 0 crossing
+  if (sign(e) != errorSign) {
+    *integrator = 0;
+  }
+  errorSign = sign(e);
   return output;
 }
+
 // stopwatch function
 bool increment_time(void *) {
   t += 0.5;
@@ -200,7 +219,7 @@ void loop() {
   static int pos = 0;
   int newPos = encoder.getPosition();
   if (pos != newPos) {
-    *ref += 0.5 * (float)encoder.getDirection();
+    *ref -= 0.5 * (float)encoder.getDirection();
     if(*ref < 0) *ref = 0;
     if(*ref > REFMAX) *ref = REFMAX;
     pos = newPos;
